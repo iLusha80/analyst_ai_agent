@@ -24,7 +24,7 @@ def get_db_uri() -> str:
     host = os.getenv("DB_HOST", "localhost")
     # Порт 5433 мы пробрасывали на хост-машину для локальной отладки
     # Внутри Docker-сети сервисы общаются по стандартным портам
-    port = os.getenv("DB_PORT", "5432")
+    port = os.getenv("DB_PORT", "5433")
 
     if not all([user, password, db, host, port]):
         raise ValueError("Одна или несколько переменных окружения для БД не установлены.")

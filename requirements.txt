@@ -1,0 +1,20 @@
+# analyst_ai_agent/requirements.txt
+
+# Для генератора данных и подключения к БД
+faker
+psycopg2-binary
+python-dotenv
+
+# Для бэкенда (добавим сразу)
+fastapi
+uvicorn
+
+# Для AI-агента (добавим сразу)
+langchain
+langchain-openai  # или langchain-community, в зависимости от LLM
+langgraph
+sqlalchemy
+
+# Для фронтенда (добавим сразу)
+streamlit
+requests

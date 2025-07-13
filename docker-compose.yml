@@ -1,0 +1,31 @@
+# docker-compose.yml
+
+version: '3.8'
+
+services:
+  # Сервис базы данных PostgreSQL
+  db:
+    image: postgres:15-alpine  # Используем легковесный образ Postgres
+    container_name: insight_agent_db
+    restart: unless-stopped
+
+    # Передаем переменные окружения из .env файла в контейнер
+    # PostgreSQL использует их для создания пользователя и базы данных
+    env_file:
+      - ./.env
+
+    ports:
+      # Пробрасываем порт 5432 контейнера на порт 5433 хоста
+      # чтобы не конфликтовать с локально установленным Postgres
+      - "5433:5432"
+
+    volumes:
+      # 1. Создаем именованный том для хранения данных БД между перезапусками
+      - pgdata:/var/lib/postgresql/data
+      # 2. Монтируем наш init.sql скрипт в специальную директорию внутри контейнера
+      # Скрипты из этой папки выполняются при первом запуске контейнера
+      - ./data/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+# Именованные тома (volumes) для персистентного хранения данных
+volumes:
+  pgdata:

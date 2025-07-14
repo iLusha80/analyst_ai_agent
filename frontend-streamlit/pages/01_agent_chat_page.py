@@ -1,35 +1,32 @@
-# frontend-streamlit/pages/01_chat.py (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+# frontend-streamlit/pages/01_chat.py (ВЕРСИЯ ДЛЯ НОВОГО ГРАФА)
 
 import streamlit as st
 from langchain_core.messages import HumanMessage, AIMessage
 
+# ИЗМЕНЕНИЕ: Импортируем сам исполняемый объект agent_executor
+from agent.agent_graph import agent_executor, SYSTEM_PROMPT
+
 from core import init_session_state
-from agent.agent_graph import get_agent_executor
-
-
-@st.cache_resource
-def load_agent_executor():
-    """Загружает и кэширует исполняемый объект агента."""
-    return get_agent_executor()
-
 
 # --- Основная логика страницы ---
-
 st.set_page_config(page_title="Аналитический чат", page_icon="💬", layout="wide")
-init_session_state()
+
+# ИЗМЕНЕНИЕ: Переопределяем init_session_state, чтобы он добавлял системный промпт
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "assistant", "content": SYSTEM_PROMPT}  # Первое сообщение - это правила для агента
+    ]
+    st.session_state.messages.append(
+        {"role": "assistant", "content": "Здравствуйте! Я Insight Agent. Задайте мне вопрос."}
+    )
 
 st.title("💬 Аналитический чат")
-st.markdown("Задайте ваш вопрос на естественном языке, и я постараюсь найти ответ в данных.")
+st.markdown("Задайте ваш вопрос на естественном языке.")
 
-for message in st.session_state.messages:
+# Отображаем историю, пропуская первое системное сообщение
+for message in st.session_state.messages[1:]:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
-
-try:
-    agent_executor = load_agent_executor()
-except ValueError as e:
-    st.error(f"Ошибка инициализации агента: {e}")
-    st.stop()
 
 if prompt := st.chat_input("Например: Сколько у нас всего клиентов из Москвы?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -39,29 +36,23 @@ if prompt := st.chat_input("Например: Сколько у нас всег�
     with st.chat_message("assistant"):
         with st.spinner("🤖 Думаю и анализирую данные..."):
 
+            # Собираем историю для агента (включая системный промпт)
             chat_history_for_agent = []
-            for msg in st.session_state.messages[1:-1]:
+            for msg in st.session_state.messages:
                 if msg["role"] == "user":
                     chat_history_for_agent.append(HumanMessage(content=msg["content"]))
-                else:
+                else:  # assistant
                     chat_history_for_agent.append(AIMessage(content=msg["content"]))
 
-            # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
-            # Мы должны передавать полный объект состояния, который ожидает граф,
-            # включая пустой список для intermediate_steps.
-            agent_input = {
-                "question": prompt,
-                "chat_history": chat_history_for_agent,
-                "intermediate_steps": []  # <--- ЭТОТ КЛЮЧ РЕШАЕТ ПРОБЛЕМУ
-            }
+            # Входные данные - это просто список сообщений
+            agent_input = {"messages": chat_history_for_agent}
 
             try:
-                # В agent_graph.py теперь возвращается финальное состояние целиком
-                final_state = agent_executor.invoke(agent_input)
-                # Извлекаем финальный ответ из словаря
-                response_content = final_state['agent_outcome'].return_values['output']
+                # Вызываем агент
+                response_dict = agent_executor.invoke(agent_input)
+                # Извлекаем контент из последнего сообщения
+                response_content = response_dict['messages'][-1].content
             except Exception as e:
-                # Добавим traceback для более удобной отладки в консоли
                 import traceback
 
                 print(traceback.format_exc())

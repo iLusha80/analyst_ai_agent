@@ -10,8 +10,9 @@ fastapi
 uvicorn
 
 # Для AI-агента (добавим сразу)
-langchain
-langchain-openai  # или langchain-community, в зависимости от LLM
+langchain # или langchain-community, в зависимости от LLM
+langchain_community
+langchain-google-genai
 langgraph
 sqlalchemy
 

@@ -2,6 +2,7 @@
 
 from typing import List
 from sqlalchemy.engine import Engine
+from sqlalchemy import text # Добавляем импорт text
 
 # ИЗМЕНЕНИЕ 1: ИСПОЛЬЗУЕМ САМЫЙ АКТУАЛЬНЫЙ ИМПОРТ, ПРЕДЛОЖЕННЫЙ БИБЛИОТЕКОЙ
 from langchain_community.tools import QuerySQLDatabaseTool
@@ -21,7 +22,8 @@ def get_table_schema_description(engine: Engine) -> str:
     print("DEBUG: Вызов get_table_schema_description().") # Отладочный вывод
     try:
         with engine.connect() as connection:
-            query = "SELECT table_name, column_name, description FROM table_metadata ORDER BY table_name, id;"
+            # Оборачиваем SQL-запрос в text() для явного указания SQLAlchemy
+            query = text("SELECT table_name, column_name, description FROM table_metadata ORDER BY table_name, id;")
             print(f"DEBUG: get_table_schema_description - Выполнение запроса: {query}") # Отладочный вывод
             results = connection.execute(query).fetchall()
             print(f"DEBUG: get_table_schema_description - Результаты запроса: {results}") # Отладочный вывод

@@ -46,13 +46,16 @@ if prompt := st.chat_input("Например: Сколько у нас всег�
 
             # Входные данные - это история сообщений
             agent_input = {"messages": chat_history_for_agent}
+            print(f"DEBUG: agent_input: {agent_input}") # Отладочный вывод
 
             try:
                 response_dict = agent_executor.invoke(agent_input)
+                print(f"DEBUG: response_dict: {response_dict}") # Отладочный вывод
                 response_content = response_dict['messages'][-1].content
             except Exception as e:
                 import traceback
 
+                print(f"DEBUG: Произошла ошибка при вызове агента: {e}") # Отладочный вывод
                 print(traceback.format_exc())
                 response_content = f"Произошла ошибка при обработке вашего запроса: {e}"
                 st.error(response_content)

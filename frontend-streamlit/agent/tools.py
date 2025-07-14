@@ -18,10 +18,13 @@ def get_table_schema_description(engine: Engine) -> str:
     Кастомная функция для получения описания всех таблиц и их полей
     из нашей специальной таблицы 'table_metadata'.
     """
+    print("DEBUG: Вызов get_table_schema_description().") # Отладочный вывод
     try:
         with engine.connect() as connection:
             query = "SELECT table_name, column_name, description FROM table_metadata ORDER BY table_name, id;"
+            print(f"DEBUG: get_table_schema_description - Выполнение запроса: {query}") # Отладочный вывод
             results = connection.execute(query).fetchall()
+            print(f"DEBUG: get_table_schema_description - Результаты запроса: {results}") # Отладочный вывод
 
         schema_description = "Вот схема и описание доступных таблиц:\n\n"
         current_table = ""
@@ -32,9 +35,11 @@ def get_table_schema_description(engine: Engine) -> str:
                 schema_description += f"Таблица `{current_table}`:\n"
             schema_description += f"- Поле `{column}`: {description}\n"
 
+        print("DEBUG: get_table_schema_description - Схема успешно получена.") # Отладочный вывод
         return schema_description
 
     except Exception as e:
+        print(f"DEBUG: get_table_schema_description - Произошла ошибка: {e}") # Отладочный вывод
         return f"Произошла ошибка при получении схемы базы данных: {e}"
 
 
@@ -43,14 +48,18 @@ def get_agent_tools() -> List[Tool]:
     Фабричная функция для создания и получения списка всех инструментов,
     доступных для AI-агента.
     """
+    print("DEBUG: Вызов get_agent_tools().") # Отладочный вывод
     engine = get_engine()
     if engine is None:
+        print("DEBUG: get_agent_tools() - Не удалось получить подключение к базе данных.") # Отладочный вывод
         raise ValueError("Не удалось получить подключение к базе данных. Инструменты не могут быть созданы.")
 
     db = SQLDatabase(engine)
+    print("DEBUG: get_agent_tools() - SQLDatabase инициализирован.") # Отладочный вывод
 
     # ИЗМЕНЕНИЕ 2: ИСПОЛЬЗУЕМ ПРАВИЛЬНЫЙ КЛАСС С ПРАВИЛЬНЫМ ИМЕНЕМ
     sql_query_tool = QuerySQLDatabaseTool(db=db)
+    print("DEBUG: get_agent_tools() - QuerySQLDatabaseTool инициализирован.") # Отладочный вывод
 
     # "Заворачиваем" стандартный инструмент в наш Tool, чтобы дать ему понятное описание
     sql_tool = Tool(
@@ -58,6 +67,7 @@ def get_agent_tools() -> List[Tool]:
         func=sql_query_tool.run,
         description="Полезен для выполнения SQL-запросов к базе данных для получения конкретных данных. Принимает на вход полноценный SQL-запрос."
     )
+    print("DEBUG: get_agent_tools() - sql_tool создан.") # Отладочный вывод
 
     # Наш кастомный инструмент для получения описания схемы
     schema_tool = Tool(
@@ -69,5 +79,7 @@ def get_agent_tools() -> List[Tool]:
             "прежде чем составлять сложный SQL-запрос."
         )
     )
+    print("DEBUG: get_agent_tools() - schema_tool создан.") # Отладочный вывод
 
+    print("DEBUG: get_agent_tools() - Возвращаем список инструментов.") # Отладочный вывод
     return [schema_tool, sql_tool]

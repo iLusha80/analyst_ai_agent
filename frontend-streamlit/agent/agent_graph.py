@@ -22,7 +22,7 @@ tools = get_agent_tools()
 tool_node = ToolNode(tools)
 
 # Инициализируем модель Gemini
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0)
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
 
 # Привязываем инструменты к модели. Это стандартный и правильный способ.
 llm_with_tools = llm.bind_tools(tools)
@@ -44,14 +44,20 @@ agent_runnable = prompt | llm_with_tools
 # 4. ОПРЕДЕЛЯЕМ УЗЛЫ И ЛОГИКУ ГРАФА
 def call_model_node(state: AgentState):
     """Вызывает LLM для принятия решения."""
+    print(f"DEBUG: call_model_node - State: {state}") # Отладочный вывод
     response = agent_runnable.invoke(state)
+    print(f"DEBUG: call_model_node - Response from LLM: {response}") # Отладочный вывод
     return {"messages": [response]}
 
 def should_continue_router(state: AgentState):
     """Определяет, нужно ли вызывать инструменты."""
+    print(f"DEBUG: should_continue_router - State: {state}") # Отладочный вывод
     last_message = state["messages"][-1]
+    print(f"DEBUG: should_continue_router - Last message: {last_message}") # Отладочный вывод
     if last_message.tool_calls:
+        print("DEBUG: should_continue_router - Tool calls detected, continuing to action.") # Отладочный вывод
         return "continue"
+    print("DEBUG: should_continue_router - No tool calls, ending.") # Отладочный вывод
     return "end"
 
 # 5. СОБИРАЕМ ГРАФ

@@ -1,8 +1,11 @@
+# frontend-streamlit/agent/agent_graph.py (СТАБИЛЬНАЯ И ПРОВЕРЕННАЯ ВЕРСИЯ)
+
 import os
 import operator
 from typing import TypedDict, Annotated, List
-from langchain_core.messages import BaseMessage, AIMessage
 
+from langchain_core.messages import BaseMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
@@ -10,46 +13,48 @@ from langgraph.prebuilt import ToolNode
 from .tools import get_agent_tools
 from .prompts import SYSTEM_PROMPT
 
-
+# 1. ОПРЕДЕЛЯЕМ СОСТОЯНИЕ (STATE)
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], operator.add]
 
-
-def call_model_node(state: AgentState):
-    """Вызывает LLM и добавляет отладочный вывод."""
-    print("---[ ВЫЗОВ МОДЕЛИ ]---")
-    print(f"Сообщения на входе: {[msg.pretty_repr() for msg in state['messages']]}")
-
-    response = llm.invoke(state["messages"])
-
-    print(f"Ответ модели: {response.pretty_repr()}")
-    print("---[ КОНЕЦ ВЫЗОВА МОДЕЛИ ]---\n")
-    return {"messages": [response]}
-
-
-# Инициализация инструментов и модели
+# 2. ИНИЦИАЛИЗАЦИЯ ИНСТРУМЕНТОВ И МОДЕЛИ
 tools = get_agent_tools()
 tool_node = ToolNode(tools)
 
-# ИЗМЕНЕНИЕ: Используем правильное и актуальное имя модели
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0).bind_tools(tools)
+# Инициализируем модель Gemini
+llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0)
 
+# Привязываем инструменты к модели. Это стандартный и правильный способ.
+llm_with_tools = llm.bind_tools(tools)
+
+# 3. СОЗДАЕМ ПРОМПТ И "МОЗГ" АГЕНТА
+# Мы явно указываем, где системный промпт, а где история чата.
+# Это самый надежный способ.
+prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", SYSTEM_PROMPT),
+        MessagesPlaceholder(variable_name="messages"),
+    ]
+)
+
+# Соединяем промпт и модель с инструментами в единую цепочку
+agent_runnable = prompt | llm_with_tools
+
+
+# 4. ОПРЕДЕЛЯЕМ УЗЛЫ И ЛОГИКУ ГРАФА
+def call_model_node(state: AgentState):
+    """Вызывает LLM для принятия решения."""
+    response = agent_runnable.invoke(state)
+    return {"messages": [response]}
 
 def should_continue_router(state: AgentState):
-    """Определяет, куда двигаться дальше, и добавляет отладочный вывод."""
-    print("---[ РОУТЕР ]---")
+    """Определяет, нужно ли вызывать инструменты."""
     last_message = state["messages"][-1]
-    if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
-        print("Решение: ЗАВЕРШИТЬ (нет вызовов инструментов)")
-        print("---[ КОНЕЦ РОУТЕРА ]---\n")
-        return "end"
-    else:
-        print("Решение: ПРОДОЛЖИТЬ (обработать инструменты)")
-        print("---[ КОНЕЦ РОУТЕРА ]---\n")
+    if last_message.tool_calls:
         return "continue"
+    return "end"
 
-
-# Сборка графа
+# 5. СОБИРАЕМ ГРАФ
 workflow = StateGraph(AgentState)
 workflow.add_node("agent", call_model_node)
 workflow.add_node("action", tool_node)
@@ -60,5 +65,4 @@ workflow.add_conditional_edges(
     {"continue": "action", "end": END},
 )
 workflow.add_edge("action", "agent")
-
 agent_executor = workflow.compile()

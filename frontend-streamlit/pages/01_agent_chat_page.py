@@ -1,29 +1,33 @@
+# frontend-streamlit/pages/01_chat.py (ВЕРСИЯ ДЛЯ СТАБИЛЬНОГО ГРАФА)
+
 import streamlit as st
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage
 
 from agent.agent_graph import agent_executor
-from agent.prompts import SYSTEM_PROMPT  # Импортируем промпт
-from core import init_session_state
+from core import init_session_state  # Промпт импортировать больше не нужно
 
-# --- Основная логика страницы ---
 st.set_page_config(page_title="Аналитический чат", page_icon="💬", layout="wide")
 
-# init_session_state теперь просто создает пустой список, если его нет
+# init_session_state теперь просто создает пустой список
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 st.title("💬 Аналитический чат")
 st.markdown("Задайте ваш вопрос на естественном языке.")
 
-# Отображаем историю сообщений, если она есть
+# Отображаем историю
 if not st.session_state.messages:
-    st.info("История чата пуста. Начните диалог!")
-else:
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    # Приветственное сообщение для первого запуска
+    st.session_state.messages.append(
+        {"role": "assistant", "content": "Здравствуйте! Я Insight Agent. Задайте мне вопрос."}
+    )
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
 if prompt := st.chat_input("Например: Сколько у нас всего клиентов?"):
+    # Добавляем сообщение пользователя в нашу локальную историю
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -31,14 +35,16 @@ if prompt := st.chat_input("Например: Сколько у нас всег�
     with st.chat_message("assistant"):
         with st.spinner("🤖 Думаю и анализирую данные..."):
 
-            # Собираем историю для агента
-            chat_history_for_agent = [SystemMessage(content=SYSTEM_PROMPT)]
-            for msg in st.session_state.messages:
+            # Собираем историю для агента (БЕЗ системного промпта)
+            chat_history_for_agent = []
+            # Берем все сообщения, кроме первого приветственного
+            for msg in st.session_state.messages[1:]:
                 if msg["role"] == "user":
                     chat_history_for_agent.append(HumanMessage(content=msg["content"]))
                 else:
                     chat_history_for_agent.append(AIMessage(content=msg["content"]))
 
+            # Входные данные - это история сообщений
             agent_input = {"messages": chat_history_for_agent}
 
             try:
@@ -52,5 +58,5 @@ if prompt := st.chat_input("Например: Сколько у нас всег�
                 st.error(response_content)
 
             st.markdown(response_content)
-            # Добавляем в историю только финальный ответ агента
+            # Добавляем финальный ответ агента в локальную историю
             st.session_state.messages.append({"role": "assistant", "content": response_content})

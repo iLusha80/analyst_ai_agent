@@ -1,5 +1,6 @@
 # frontend-streamlit/lc_agent/agent_builder.py (ФИНАЛЬНАЯ ВЕРСИЯ С ПРАВИЛЬНЫМ ПРИЕМОМ АРГУМЕНТОВ)
 
+import json
 from langchain_community.agent_toolkits import create_sql_agent, SQLDatabaseToolkit
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import AgentExecutor
@@ -17,8 +18,7 @@ from .prompts import LC_AGENT_PROMPT_PREFIX
 from tools.custom_tools import get_table_schema_description
 
 class TableDisplayArgs(BaseModel):
-    data: List[dict] = Field(description="Данные для отображения в виде списка словарей, где каждый словарь - это строка.")
-    columns: List[str] = Field(description="Список названий колонок в том порядке, в котором они должны быть отображены.")
+    json_input: str = Field(description="JSON-строка, содержащая данные для отображения в виде списка словарей и список названий колонок.")
 
 class DisplayTableTool(BaseTool):
     """Инструмент, который служит сигналом для UI для отображения таблицы."""
@@ -32,10 +32,21 @@ class DisplayTableTool(BaseTool):
     # --- ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ ---
     # Мы явно указываем, что метод принимает аргументы 'data' и 'columns'.
     # Это позволяет LangChain правильно передать в них значения из JSON.
-    def _run(self, data: List[dict], columns: List[str]) -> str:
-        # Этот инструмент по-прежнему не выполняет никакой логики,
-        # но теперь он корректно принимает структурированные данные.
-        return "Таблица была успешно передана для отображения."
+    def _run(self, json_input: str) -> str:
+        # Парсим json_input как JSON-строку
+        try:
+            parsed_input = json.loads(json_input)
+            data = parsed_input.get("data")
+            columns = parsed_input.get("columns")
+
+            if data is None or columns is None:
+                return f"Ошибка: Отсутствуют 'data' или 'columns' в json_input: {json_input}"
+
+            # Этот инструмент по-прежнему не выполняет никакой логики,
+            # но теперь он корректно принимает структурированные данные.
+            return "Таблица была успешно передана для отображения."
+        except json.JSONDecodeError as e:
+            return f"Ошибка парсинга JSON: {e}. Получено: {json_input}"
 
 def _handle_parsing_error(error: OutputParserException) -> AgentFinish:
     """Обработчик ошибок парсинга ответа LLM."""

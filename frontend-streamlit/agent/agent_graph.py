@@ -22,7 +22,7 @@ tools = get_agent_tools()
 tool_node = ToolNode(tools)
 
 # Инициализируем модель Gemini
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, model_kwargs={"tool_calling_config": {"mode": "ANY"}})
 
 # Привязываем инструменты к модели. Это стандартный и правильный способ.
 llm_with_tools = llm.bind_tools(tools)

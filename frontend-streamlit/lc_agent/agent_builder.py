@@ -1,4 +1,4 @@
-# frontend-streamlit/lc_agent/agent_builder.py (ВЕРСИЯ С ПРАВИЛЬНЫМ ИМПОРТОМ)
+# frontend-streamlit/lc_agent/agent_builder.py (ФИНАЛЬНАЯ ВЕРСИЯ С УНИВЕРСАЛЬНЫМ ОБРАБОТЧИКОМ)
 
 from langchain_community.agent_toolkits import create_sql_agent, SQLDatabaseToolkit
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -7,12 +7,13 @@ from langchain_community.utilities.sql_database import SQLDatabase
 from langchain.tools import Tool
 from typing import List
 
-# --- ИСПРАВЛЕННЫЙ ИМПОРТ ---
+# УБИРАЕМ ЛИШНИЕ ИМПОРТЫ
 from langchain_core.agents import AgentFinish
+from langchain_core.exceptions import OutputParserException
 
 from core.db_connect import get_engine
 from .prompts import LC_AGENT_PROMPT_PREFIX
-from agent.tools import get_table_schema_description
+from tools.custom_tools import get_table_schema_description
 
 
 def display_table(data: str) -> str:
@@ -20,30 +21,26 @@ def display_table(data: str) -> str:
     return "Таблица была успешно передана для отображения."
 
 
-def _handle_parsing_error(error: Exception) -> AgentFinish:
+# --- НОВЫЙ, УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ОШИБОК ---
+def _handle_parsing_error(error: OutputParserException) -> AgentFinish:
     """
     Эта функция вызывается, когда агент не может разобрать ответ от LLM.
-    Она "ловит" некорректный текстовый ответ и превращает его в финальный
-    ответ агента, предотвращая падение.
+    Она берет "сырой" ответ LLM из объекта ошибки и превращает его
+    в финальный ответ агента, предотвращая падение.
     """
-    error_str = str(error)
-    # Извлекаем "сырой" ответ LLM из текста ошибки
-    try:
-        response = error_str.split("Could not parse LLM output: `")[1].strip().replace("`", "")
-    except IndexError:
-        # Если формат ошибки другой, возвращаем текст ошибки как есть
-        response = error_str
+    # Объект OutputParserException содержит "сырой" ответ в атрибуте 'llm_output'
+    response = error.llm_output
 
-    print(f"ПОЙМАНА ОШИБКА ПАРСИНГА. Возвращаем текст: {response}")
+    print(f"ПОЙМАНА ОШИБКА ПАРСИНГА. Возвращаем 'сырой' текст: {response}")
 
     # Возвращаем объект AgentFinish, который корректно завершает работу агента
-    return AgentFinish({"output": response}, log=error_str)
+    return AgentFinish({"output": response}, log=str(error))
 
 
 def create_lc_agent() -> AgentExecutor:
     """
-    Создает LangChain SQL Agent, дополненный кастомными инструментами и
-    устойчивостью к ошибкам парсинга.
+    Создает LangChain SQL Agent с кастомными инструментами и
+    универсальным обработчиком ошибок парсинга.
     """
     engine = get_engine()
     db = SQLDatabase(engine)
@@ -69,6 +66,7 @@ def create_lc_agent() -> AgentExecutor:
         toolkit=toolkit,
         verbose=True,
         prefix=LC_AGENT_PROMPT_PREFIX,
+        # Передаем нашу новую, более надежную функцию
         handle_parsing_errors=_handle_parsing_error,
         extra_tools=custom_tools
     )

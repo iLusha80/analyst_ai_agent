@@ -1,40 +1,50 @@
-# frontend-streamlit/lc_agent/agent_builder.py
+# frontend-streamlit/lc_agent/agent_builder.py (ВЕРСИЯ С КАСТОМНЫМ ИНСТРУМЕНТОМ)
 
 from langchain_community.agent_toolkits import create_sql_agent, SQLDatabaseToolkit
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import AgentExecutor
 from langchain_community.utilities.sql_database import SQLDatabase
+from langchain.tools import Tool
 
 from core.db_connect import get_engine
 from .prompts import LC_AGENT_PROMPT_PREFIX
 
+# ИМПОРТИРУЕМ НАШУ УМНУЮ ФУНКЦИЮ ИЗ ПАПКИ ДРУГОГО АГЕНТА!
+# Это нормально для прототипа, т.к. функция универсальна.
+from agent.tools import get_table_schema_description
+
+
 def create_lc_agent() -> AgentExecutor:
     """
-    Создает и возвращает готовый к использованию LangChain SQL Agent.
+    Создает и возвращает LangChain SQL Agent, дополненный нашим кастомным
+    инструментом для получения описания схемы.
     """
-    # Получаем подключение к БД (так же, как и раньше)
     engine = get_engine()
     db = SQLDatabase(engine)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
 
-    # Инициализируем LLM
-    llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0)
-
-    # SQLDatabaseToolkit - это ГОТОВЫЙ НАБОР инструментов.
-    # Он автоматически включает в себя:
-    # - Инструмент для выполнения запросов
-    # - Инструмент для получения схемы
-    # - Инструмент для получения списка таблиц
-    # Нам не нужно создавать их вручную, как в LangGraph!
+    # Стандартный набор инструментов (выполнение SQL, проверка схемы и т.д.)
     toolkit = SQLDatabaseToolkit(db=db, llm=llm)
 
-    # create_sql_agent - это высокоуровневая "фабрика", которая
-    # собирает всё вместе: LLM, toolkit и правильный промпт.
+    # --- СОЗДАНИЕ НАШЕГО КАСТОМНОГО ИНСТРУМЕНТА ---
+    # Мы "заворачиваем" нашу функцию в объект Tool, чтобы агент мог ее видеть.
+    schema_description_tool = Tool(
+        name="database_schema_description",
+        func=lambda _: get_table_schema_description(engine),
+        description=(
+            "ОБЯЗАТЕЛЬНО используй этот инструмент В ПЕРВУЮ ОЧЕРЕДЬ, чтобы получить "
+            "полное и понятное описание всех таблиц и полей в базе данных."
+        )
+    )
+
+    # --- ГЛАВНОЕ ИЗМЕНЕНИЕ ---
+    # Мы передаем наш кастомный инструмент в агент через параметр `extra_tools`.
     return create_sql_agent(
         llm=llm,
         toolkit=toolkit,
-        verbose=True,  # Включаем логирование "мыслей" агента в консоль
+        verbose=True,
         prefix=LC_AGENT_PROMPT_PREFIX,
-        # Это очень важный параметр для стабильности.
-        # Он помогает агенту не падать, если LLM сгенерировала некорректный ответ.
         handle_parsing_errors=True,
+        # Добавляем наш инструмент в "арсенал" агента
+        extra_tools=[schema_description_tool]
     )

@@ -1,8 +1,5 @@
-# frontend-streamlit/app.py (ВЕРСИЯ ДЛЯ ПРИЕМА СТРУКТУРИРОВАННЫХ ДАННЫХ)
-
 import streamlit as st
 import pandas as pd
-
 from lc_agent.agent_builder import create_lc_agent
 
 st.set_page_config(page_title="Insight Agent", page_icon="💡", layout="wide")
@@ -33,7 +30,7 @@ for message in st.session_state.messages:
 
 agent_executor = load_agent()
 
-# Предопределенные запросы
+# --- Логика кнопок ---
 predefined_queries = [
     "Сколько всего клиентов?",
     "Покажи средний возраст клиентов.",
@@ -46,52 +43,69 @@ st.markdown("---")
 st.subheader("Быстрые запросы:")
 cols = st.columns(5)
 for i, query in enumerate(predefined_queries):
-    with cols[i]:
-        if st.button(query):
-            st.session_state.chat_input_value = query
-            st.session_state.send_message_flag = True
+    if cols[i].button(query, key=f"query_btn_{i}"):
+        # Просто сохраняем значение. Streamlit сам перезапустит скрипт.
+        st.session_state.user_input = query
+        # Немедленно перезапускаем скрипт, чтобы обработать ввод от кнопки
+        # Это важно, чтобы кнопка вела себя так же, как поле ввода
+        st.rerun() 
 
-# Инициализация chat_input_value, если его нет
-if "chat_input_value" not in st.session_state:
-    st.session_state.chat_input_value = ""
+# --- Унифицированная обработка ввода ---
 
-# Поле ввода чата всегда отображается
-prompt = st.chat_input("Например: Покажи первых 5 клиентов", value=st.session_state.chat_input_value, key="chat_input")
+# Сначала получаем ввод из поля чата
+chat_prompt = st.chat_input("Например: Покажи первых 5 клиентов")
 
-# Если сообщение нужно отправить (из кнопки или из поля ввода)
-if prompt or st.session_state.get("send_message_flag"):
-    # Сбрасываем флаг
-    st.session_state.send_message_flag = False
-    # Сбрасываем значение поля ввода после отправки
-    st.session_state.chat_input_value = ""
+# Проверяем, был ли ввод из чата ИЛИ от кнопки (сохраненный в session_state)
+prompt_to_process = chat_prompt or st.session_state.get("user_input")
 
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+if prompt_to_process:
+    # Важно: Сразу сбрасываем значение от кнопки, чтобы оно не сработало повторно
+    if "user_input" in st.session_state:
+        del st.session_state.user_input
 
+    # Добавляем сообщение пользователя в историю и отображаем его
+    st.session_state.messages.append({"role": "user", "content": prompt_to_process})
+    
+    # ПЕРЕЗАПУСКАЕМ СТРАНИЦУ, ЧТОБЫ СРАЗУ ПОКАЗАТЬ СООБЩЕНИЕ ПОЛЬЗОВАТЕЛЯ
+    # Этот rerun нужен, чтобы пользователь увидел свой вопрос до того, как агент начнет думать.
+    # Это создает более отзывчивый интерфейс.
+    st.rerun()
+
+# --- Блок вызова агента теперь запускается ПОСЛЕ отображения сообщения пользователя ---
+# Мы ищем последнее сообщение от пользователя, которое еще не обработано.
+last_message = st.session_state.messages[-1]
+if last_message["role"] == "user" and st.session_state.get("last_processed_message") != last_message["content"]:
+    
     with st.chat_message("assistant"):
         with st.spinner("🤖 Думаю..."):
             try:
+                prompt = last_message["content"]
+                st.session_state.last_processed_message = prompt
+
                 agent_input = {"input": prompt}
                 response_dict = agent_executor.invoke(agent_input)
                 
-                # --- ЛОГИКА ПЕРЕХВАТА СТРУКТУРИРОВАННОЙ ТАБЛИЦЫ ---
-                if 'intermediate_steps' in response_dict:
-                    for action, result in response_dict['intermediate_steps']:
-                        if action.tool == 'display_table':
-                            # action.tool_input теперь - это словарь, а не строка
+                if 'intermediate_steps' in response_dict and response_dict['intermediate_steps']:
+                    for action, result in reversed(response_dict['intermediate_steps']):
+                        if action.tool == 'display_table' and isinstance(action.tool_input, dict):
                             tool_input = action.tool_input
-                            df = pd.DataFrame(tool_input['data'], columns=tool_input['columns'])
+                            df = pd.DataFrame(tool_input.get('data', []), columns=tool_input.get('columns', []))
                             st.dataframe(df)
                             st.session_state.messages.append({"role": "assistant", "content": df})
+                            break
                 
-                response_content = response_dict['output']
-                st.markdown(response_content)
-                st.session_state.messages.append({"role": "assistant", "content": response_content})
+                response_content = response_dict.get('output', 'Нет текстового ответа.')
+                if response_content:
+                    st.markdown(response_content)
+                    st.session_state.messages.append({"role": "assistant", "content": response_content})
 
             except Exception as e:
                 import traceback
-                print(traceback.format_exc())
+                error_message = traceback.format_exc()
+                print(error_message)
                 response_content = f"Произошла ошибка: {e}"
                 st.error(response_content)
                 st.session_state.messages.append({"role": "assistant", "content": response_content})
+    
+    # Финальный rerun, чтобы обновить всю страницу после ответа ассистента
+    st.rerun()

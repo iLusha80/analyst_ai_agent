@@ -58,7 +58,7 @@ def create_lc_agent() -> AgentExecutor:
     """Создает LangChain SQL Agent."""
     engine = get_engine()
     db = SQLDatabase(engine)
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0)
     
     toolkit = SQLDatabaseToolkit(db=db, llm=llm)
 

@@ -1,17 +1,40 @@
 import streamlit as st
 import pandas as pd
+import json
+
 from lc_agent.agent_builder import create_lc_agent
 
 st.set_page_config(page_title="Insight Agent", page_icon="💡", layout="wide")
 
+# --- ФУНКЦИИ С КЭШИРОВАНИЕМ ---
+
+@st.cache_data
+def load_quick_queries(file_path="frontend-streamlit/queries.json"):
+    """Загружает быстрые запросы из JSON-файла."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        st.error(f"Ошибка загрузки файла с запросами: {e}")
+        return []
+
 @st.cache_resource
 def load_agent():
+    """Загружает и кэширует экземпляр AI-агента."""
     return create_lc_agent()
+
+# --- ИНИЦИАЛИЗАЦИЯ SESSION STATE ---
 
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "assistant", "content": "Здравствуйте! Я Insight Agent. Задайте мне вопрос по данным."}
     ]
+
+if "last_processed_message" not in st.session_state:
+    st.session_state.last_processed_message = None
+
+
+# --- БОКОВАЯ ПАНЕЛЬ (SIDEBAR) ---
 
 with st.sidebar:
     st.title("💡 Insight Agent")
@@ -19,8 +42,11 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("Перейдите на страницу 'Описание данных', чтобы увидеть доступные таблицы.")
 
+# --- ОСНОВНОЙ ИНТЕРФЕЙС ЧАТА ---
+
 st.title("💬 Аналитический чат")
 
+# Отображение истории сообщений из session_state
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         if isinstance(message["content"], pd.DataFrame):
@@ -28,53 +54,46 @@ for message in st.session_state.messages:
         else:
             st.markdown(message["content"])
 
+# Загрузка агента
 agent_executor = load_agent()
 
-# --- Логика кнопок ---
-predefined_queries = [
-    "Сколько всего клиентов?",
-    "Покажи средний возраст клиентов.",
-    "Сколько активных подписок на данный момент?",
-    "Покажи топ-5 городов по количеству транзакций за последний месяц.",
-    "Какой средний доход от подписок на одного клиента в разрезе каналов регистрации за последний год?",
-    "Покажи топ-3 каналов регистрации по количеству клиентов.",
-    "Какое количество и доля подписок среди клиентов по городам?"
-]
+# --- БЛОК БЫСТРЫХ ЗАПРОСОВ (ВНУТРИ СВОРАЧИВАЕМОГО st.expander) ---
 
 st.markdown("---")
-st.subheader("Быстрые запросы:")
-cols = st.columns(len(predefined_queries))
-for i, query in enumerate(predefined_queries):
-    if cols[i].button(query, key=f"query_btn_{i}"):
-        # Просто сохраняем значение. Streamlit сам перезапустит скрипт.
-        st.session_state.user_input = query
-        # Немедленно перезапускаем скрипт, чтобы обработать ввод от кнопки
-        # Это важно, чтобы кнопка вела себя так же, как поле ввода
-        st.rerun() 
 
-# --- Унифицированная обработка ввода ---
+predefined_queries = load_quick_queries()
 
-# Сначала получаем ввод из поля чата
+if predefined_queries:
+    # ### ГЛАВНОЕ ИЗМЕНЕНИЕ ###
+    # Весь блок с кнопками теперь обернут в st.expander.
+    # Он будет по умолчанию свернут (expanded=False). 
+    # Можете поставить True, если хотите, чтобы он был открыт при загрузке страницы.
+    with st.expander("🚀 Показать быстрые запросы", expanded=False):
+        # Определяем, сколько кнопок будет в одном ряду
+        COLS_PER_ROW = 5
+
+        # Разбиваем список запросов на "ряды"
+        for i in range(0, len(predefined_queries), COLS_PER_ROW):
+            chunk = predefined_queries[i:i + COLS_PER_ROW]
+            cols = st.columns(COLS_PER_ROW)
+
+            for j, query in enumerate(chunk):
+                if cols[j].button(query, key=query, use_container_width=True):
+                    st.session_state.user_input = query
+                    st.rerun()
+
+# --- ЛОГИКА ОБРАБОТКИ ВВОДА И ВЫЗОВА АГЕНТА (БЕЗ ИЗМЕНЕНИЙ) ---
+
 chat_prompt = st.chat_input("Например: Покажи первых 5 клиентов")
-
-# Проверяем, был ли ввод из чата ИЛИ от кнопки (сохраненный в session_state)
 prompt_to_process = chat_prompt or st.session_state.get("user_input")
 
 if prompt_to_process:
-    # Важно: Сразу сбрасываем значение от кнопки, чтобы оно не сработало повторно
     if "user_input" in st.session_state:
         del st.session_state.user_input
 
-    # Добавляем сообщение пользователя в историю и отображаем его
     st.session_state.messages.append({"role": "user", "content": prompt_to_process})
-    
-    # ПЕРЕЗАПУСКАЕМ СТРАНИЦУ, ЧТОБЫ СРАЗУ ПОКАЗАТЬ СООБЩЕНИЕ ПОЛЬЗОВАТЕЛЯ
-    # Этот rerun нужен, чтобы пользователь увидел свой вопрос до того, как агент начнет думать.
-    # Это создает более отзывчивый интерфейс.
     st.rerun()
 
-# --- Блок вызова агента теперь запускается ПОСЛЕ отображения сообщения пользователя ---
-# Мы ищем последнее сообщение от пользователя, которое еще не обработано.
 last_message = st.session_state.messages[-1]
 if last_message["role"] == "user" and st.session_state.get("last_processed_message") != last_message["content"]:
     
@@ -83,7 +102,6 @@ if last_message["role"] == "user" and st.session_state.get("last_processed_messa
             try:
                 prompt = last_message["content"]
                 st.session_state.last_processed_message = prompt
-
                 agent_input = {"input": prompt}
                 response_dict = agent_executor.invoke(agent_input)
                 
@@ -109,5 +127,4 @@ if last_message["role"] == "user" and st.session_state.get("last_processed_messa
                 st.error(response_content)
                 st.session_state.messages.append({"role": "assistant", "content": response_content})
     
-    # Финальный rerun, чтобы обновить всю страницу после ответа ассистента
     st.rerun()

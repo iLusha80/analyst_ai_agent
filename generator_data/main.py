@@ -34,7 +34,7 @@ def main():
 
     parser.add_argument('--add-transactions', choices=['today', 'yesterday'],
                         help='Добавить транзакции за сегодня или вчера.')
-    parser.add_argument('--num-clients', type=int, default=200,
+    parser.add_argument('--num-clients', type=int, default=10000,
                         help='Количество клиентов для генерации (используется с --full-fresh).')
     parser.add_argument('--subscription-ratio', type=float, default=0.6,
                         help='Доля клиентов с подпиской (от 0.0 до 1.0).')
@@ -51,9 +51,9 @@ def main():
                 clients = generate_clients(cur, args.num_clients)
                 subscriptions = generate_subscriptions(cur, clients, args.subscription_ratio)
 
-                today = datetime.now()
-                one_year_ago = today - timedelta(days=365)
-                generate_transactions(cur, clients, 20, one_year_ago, today)
+                start_date_transactions = datetime(2023, 1, 1)
+                end_date_transactions = datetime(2025, 6, 30)
+                generate_transactions(cur, clients, 50, start_date_transactions, end_date_transactions)
                 generate_service_usage(cur, subscriptions)
 
                 print("\nПолная генерация данных успешно завершена!")

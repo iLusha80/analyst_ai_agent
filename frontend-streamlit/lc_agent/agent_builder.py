@@ -75,7 +75,7 @@ def create_lc_agent() -> AgentExecutor:
         llm=llm,
         toolkit=toolkit,
         verbose=True,
-        prefix=LC_AGENT_PROMPT_PREFIX,
         handle_parsing_errors=_handle_parsing_error,
-        extra_tools=custom_tools
+        extra_tools=custom_tools,
+        agent_kwargs={"prefix": LC_AGENT_PROMPT_PREFIX}
     )

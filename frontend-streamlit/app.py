@@ -33,7 +33,38 @@ for message in st.session_state.messages:
 
 agent_executor = load_agent()
 
-if prompt := st.chat_input("Например: Покажи первых 5 клиентов"):
+# Предопределенные запросы
+predefined_queries = [
+    "Сколько всего клиентов?",
+    "Покажи средний возраст клиентов.",
+    "Сколько активных подписок на данный момент?",
+    "Покажи топ-5 городов по количеству транзакций за последний месяц.",
+    "Какой средний доход от подписок на одного клиента в разрезе каналов регистрации за последний год?"
+]
+
+st.markdown("---")
+st.subheader("Быстрые запросы:")
+cols = st.columns(5)
+for i, query in enumerate(predefined_queries):
+    with cols[i]:
+        if st.button(query):
+            st.session_state.chat_input_value = query
+            st.session_state.send_message_flag = True
+
+# Инициализация chat_input_value, если его нет
+if "chat_input_value" not in st.session_state:
+    st.session_state.chat_input_value = ""
+
+# Поле ввода чата всегда отображается
+prompt = st.chat_input("Например: Покажи первых 5 клиентов", value=st.session_state.chat_input_value, key="chat_input")
+
+# Если сообщение нужно отправить (из кнопки или из поля ввода)
+if prompt or st.session_state.get("send_message_flag"):
+    # Сбрасываем флаг
+    st.session_state.send_message_flag = False
+    # Сбрасываем значение поля ввода после отправки
+    st.session_state.chat_input_value = ""
+
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)

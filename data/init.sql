@@ -1,11 +1,15 @@
 -- data/init.sql (обновленный)
 
--- Удаляем таблицы, если они существуют, чтобы избежать ошибок при перезапуске
+-- Удаляем таблицы в обратном порядке зависимостей, чтобы избежать ошибок
 DROP TABLE IF EXISTS table_metadata;
 DROP TABLE IF EXISTS service_usage;
 DROP TABLE IF EXISTS transactions;
 DROP TABLE IF EXISTS subscriptions;
 DROP TABLE IF EXISTS clients;
+
+-- Добавляем удаление новых таблиц, если они уже существуют
+DROP TABLE IF EXISTS chat_messages;
+DROP TABLE IF EXISTS chat_sessions;
 
 -- Основные таблицы
 CREATE TABLE clients (
@@ -53,3 +57,30 @@ CREATE TABLE table_metadata (
     description TEXT,
     UNIQUE(table_name, column_name)
 );
+
+-- =================================================================
+-- НОВЫЕ ТАБЛИЦЫ ДЛЯ ХРАНЕНИЯ ИСТОРИИ ЧАТОВ (ЗАДАЧА 1)
+-- =================================================================
+
+-- Таблица для хранения "задач" или "сессий" чата
+CREATE TABLE chat_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), -- Используем UUID для уникальных, непоследовательных ID
+    user_id VARCHAR(255), -- ID пользователя, пока может быть NULL
+    title VARCHAR(255) NOT NULL, -- Заголовок задачи, например, первый вопрос пользователя
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Время создания с таймзоной
+    status VARCHAR(50) NOT NULL DEFAULT 'in_progress' -- Статус: in_progress, resolved, archived
+);
+
+-- Таблица для хранения сообщений внутри каждой задачи
+CREATE TABLE chat_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE, -- Связь с задачей, удаляется вместе с ней
+    role VARCHAR(50) NOT NULL, -- 'user' или 'assistant'
+    content_type VARCHAR(50) NOT NULL, -- 'text', 'dataframe', 'sql', 'error'
+    content TEXT NOT NULL, -- Содержимое. Для структурированных данных (dataframe) будем хранить как JSON-строку.
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Добавляем индексы для ускорения частых запросов
+CREATE INDEX idx_chat_sessions_user_id ON chat_sessions(user_id);
+CREATE INDEX idx_chat_messages_session_id ON chat_messages(session_id);

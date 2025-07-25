@@ -1,0 +1,449 @@
+# frontend-streamlit/app.py
+import streamlit as st
+import pandas as pd
+import json
+
+from lc_agent.agent_builder import create_lc_agent
+
+st.set_page_config(page_title="Insight Agent", page_icon="💡", layout="wide")
+
+# --- ФУНКЦИИ С КЭШИРОВАНИЕМ ---
+
+@st.cache_data
+def load_quick_queries(file_path="frontend-streamlit/queries.json"):
+    """Загружает быстрые запросы из JSON-файла."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        st.error(f"Ошибка загрузки файла с запросами: {e}")
+        return []
+
+@st.cache_resource
+def load_agent():
+    """Загружает и кэширует экземпляр AI-агента."""
+    return create_lc_agent()
+
+# --- ИНИЦИАЛИЗАЦИЯ SESSION STATE ---
+
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Здравствуйте! Я Insight Agent. Задайте мне вопрос по данным."}
+    ]
+
+if "last_processed_message" not in st.session_state:
+    st.session_state.last_processed_message = None
+
+
+# --- БОКОВАЯ ПАНЕЛЬ (SIDEBAR) ---
+
+with st.sidebar:
+    st.title("💡 Insight Agent")
+    st.info("Прототип AI-агента для анализа данных.")
+    st.markdown("---")
+    st.markdown("Перейдите на страницу 'Описание данных', чтобы увидеть доступные таблицы.")
+
+# --- ОСНОВНОЙ ИНТЕРФЕЙС ЧАТА ---
+
+st.title("💬 Аналитический чат")
+
+# Отображение истории сообщений из session_state
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        if isinstance(message["content"], pd.DataFrame):
+            st.dataframe(message["content"])
+        else:
+            st.markdown(message["content"])
+
+# Загрузка агента
+agent_executor = load_agent()
+
+# --- БЛОК БЫСТРЫХ ЗАПРОСОВ (ВНУТРИ СВОРАЧИВАЕМОГО st.expander) ---
+
+st.markdown("---")
+
+predefined_queries = load_quick_queries()
+
+if predefined_queries:
+    # ### ГЛАВНОЕ ИЗМЕНЕНИЕ ###
+    # Весь блок с кнопками теперь обернут в st.expander.
+    # Он будет по умолчанию свернут (expanded=False). 
+    # Можете поставить True, если хотите, чтобы он был открыт при загрузке страницы.
+    with st.expander("🚀 Показать быстрые запросы", expanded=False):
+        # Определяем, сколько кнопок будет в одном ряду
+        COLS_PER_ROW = 3
+
+        # Разбиваем список запросов на "ряды"
+        for i in range(0, len(predefined_queries), COLS_PER_ROW):
+            chunk = predefined_queries[i:i + COLS_PER_ROW]
+            cols = st.columns(COLS_PER_ROW)
+
+            for j, query in enumerate(chunk):
+                if cols[j].button(query, key=query, use_container_width=True):
+                    st.session_state.user_input = query
+                    st.rerun()
+
+# --- ЛОГИКА ОБРАБОТКИ ВВОДА И ВЫЗОВА АГЕНТА (БЕЗ ИЗМЕНЕНИЙ) ---
+
+chat_prompt = st.chat_input("Например: Покажи первых 5 клиентов")
+prompt_to_process = chat_prompt or st.session_state.get("user_input")
+
+if prompt_to_process:
+    if "user_input" in st.session_state:
+        del st.session_state.user_input
+
+    st.session_state.messages.append({"role": "user", "content": prompt_to_process})
+    st.rerun()
+
+last_message = st.session_state.messages[-1]
+if last_message["role"] == "user" and st.session_state.get("last_processed_message") != last_message["content"]:
+    
+    with st.chat_message("assistant"):
+        with st.spinner("🤖 Думаю..."):
+            try:
+                prompt = last_message["content"]
+                st.session_state.last_processed_message = prompt
+                agent_input = {"input": prompt}
+                response_dict = agent_executor.invoke(agent_input)
+                
+                if 'intermediate_steps' in response_dict and response_dict['intermediate_steps']:
+                    for action, result in reversed(response_dict['intermediate_steps']):
+                        if action.tool == 'display_table' and isinstance(action.tool_input, dict):
+                            tool_input = action.tool_input
+                            df = pd.DataFrame(tool_input.get('data', []), columns=tool_input.get('columns', []))
+                            st.dataframe(df)
+                            st.session_state.messages.append({"role": "assistant", "content": df})
+                            break
+                
+                response_content = response_dict.get('output', 'Нет текстового ответа.')
+                if response_content:
+                    st.markdown(response_content)
+                    st.session_state.messages.append({"role": "assistant", "content": response_content})
+
+            except Exception as e:
+                import traceback
+                error_message = traceback.format_exc()
+                print(error_message)
+                response_content = f"Произошла ошибка: {e}"
+                st.error(response_content)
+                st.session_state.messages.append({"role": "assistant", "content": response_content})
+    
+    st.rerun()
+
+================================================================================
+
+# frontend-streamlit/tools/__init__.py
+
+
+================================================================================
+
+# frontend-streamlit/tools/custom_tools.py
+# frontend-streamlit/tools/custom_tools.py
+
+from sqlalchemy.engine import Engine
+from sqlalchemy import text
+
+
+def get_table_schema_description(engine: Engine) -> str:
+    """
+    Кастомная функция для получения описания всех таблиц и их полей
+    из нашей специальной таблицы 'table_metadata'.
+
+    Это гораздо информативнее для LLM, чем стандартный метод,
+    так как содержит описания на естественном языке.
+    """
+    try:
+        with engine.connect() as connection:
+            query = text("SELECT table_name, column_name, description FROM table_metadata ORDER BY table_name, id;")
+            results = connection.execute(query).fetchall()
+
+        if not results:
+            return "В базе данных не найдена таблица 'table_metadata' с описанием схемы. Агент не может продолжить работу без нее."
+
+        schema_description = "Вот схема и описание доступных таблиц:\n\n"
+        current_table = ""
+        for row in results:
+            table, column, description = row
+            if table != current_table:
+                current_table = table
+                schema_description += f"Таблица `{current_table}`:\n"
+            schema_description += f"- Поле `{column}`: {description}\n"
+
+        return schema_description
+
+    except Exception as e:
+        return f"Произошла ошибка при получении схемы базы данных: {e}"
+
+
+================================================================================
+
+# frontend-streamlit/core/__init__.py
+# frontend-streamlit/core/__init__.py
+
+from .db_connect import get_engine, get_db_uri
+
+# __all__ - это список имен, которые будут импортированы,
+# когда кто-то выполнит 'from core import *'. Это хорошая практика.
+__all__ = [
+    'get_engine',
+    'get_db_uri'
+]
+
+
+================================================================================
+
+# frontend-streamlit/core/db_connect.py
+# frontend-streamlit/core/db_connect.py
+
+import os
+from sqlalchemy import create_engine, Engine
+import streamlit as st
+from dotenv import load_dotenv
+
+
+def get_db_uri() -> str:
+    """
+    Собирает URI для подключения к базе данных из переменных окружения.
+    """
+    # Загружаем переменные из .env файла, который находится в корне проекта
+    # Путь '../../.env' означает "подняться на два уровня вверх от текущего файла"
+    dotenv_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
+    load_dotenv(dotenv_path=dotenv_path)
+
+    # Получаем учетные данные из переменных окружения
+    user = os.getenv("POSTGRES_USER")
+    password = os.getenv("POSTGRES_PASSWORD")
+    db = os.getenv("POSTGRES_DB")
+    # Хост 'db' - это имя сервиса в docker-compose.yml
+    # При запуске вне докера, можно использовать 'localhost'
+    host = os.getenv("DB_HOST", "localhost")
+    # Порт 5433 мы пробрасывали на хост-машину для локальной отладки
+    # Внутри Docker-сети сервисы общаются по стандартным портам
+    port = os.getenv("DB_PORT", "5433")
+
+    if not all([user, password, db, host, port]):
+        raise ValueError("Одна или несколько переменных окружения для БД не установлены.")
+
+    # Формат URI для SQLAlchemy: postgresql+драйвер://user:password@host:port/dbname
+    return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db}"
+
+
+@st.cache_resource
+def get_engine() -> Engine:
+    """
+    Создает и кэширует объект SQLAlchemy Engine.
+
+    Декоратор @st.cache_resource гарантирует, что функция выполнится только один раз,
+    а результат (объект Engine) будет сохранен и переиспользован при последующих
+    запусках скрипта (например, при нажатии на кнопку в UI).
+
+    Returns:
+        sqlalchemy.engine.Engine: Объект для взаимодействия с БД.
+    """
+    try:
+        uri = get_db_uri()
+        print("Создание нового подключения к БД (Engine)...")  # Это сообщение появится в консоли только один раз
+        engine = create_engine(uri)
+        # Простая проверка соединения
+        with engine.connect() as connection:
+            print("Соединение с БД успешно установлено.")
+        return engine
+    except Exception as e:
+        st.error(f"Не удалось подключиться к базе данных: {e}")
+        # Возвращаем None или прерываем выполнение, чтобы приложение не упало
+        return None
+
+================================================================================
+
+# frontend-streamlit/pages/data_schema.py
+import streamlit as st
+import pandas as pd
+from sqlalchemy.engine import Engine
+
+from core import get_engine # Импортируем нашу функцию для подключения
+
+st.set_page_config(page_title="Описание данных",
+                   page_icon="📄",
+                   layout="wide")
+
+
+# Используем @st.cache_data, чтобы не загружать данные при каждом действии
+@st.cache_data(ttl=3600)
+def load_metadata(_engine: Engine) -> pd.DataFrame:
+    """Загружает метаданные из таблицы table_metadata."""
+    if _engine is None:
+        return pd.DataFrame()
+    try:
+        query = "SELECT table_name, column_name, description FROM table_metadata ORDER BY table_name, id;"
+        return pd.read_sql(query, _engine)
+    except Exception as e:
+        st.error(f"Ошибка при загрузке метаданных: {e}")
+        return pd.DataFrame()
+
+# --- Основная логика страницы ---
+
+# Заголовок страницы
+
+st.title("📄 Описание данных")
+st.markdown("""
+Здесь представлено описание таблиц и полей, доступных для анализа.
+AI-агент использует эту информацию для построения корректных SQL-запросов.
+""")
+
+# Получаем подключение к БД
+engine = get_engine()
+
+# Проверка подключения
+if engine is None:
+    st.error("❌ Не удалось подключиться к базе данных. Проверьте настройки и статус Docker-контейнера.")
+    st.stop()
+
+metadata_df = load_metadata(engine)
+
+if metadata_df.empty:
+    st.warning("Не удалось загрузить описание таблиц. Возможно, база данных пуста. Запустите генератор данных.")
+else:
+    # Группируем данные по имени таблицы для красивого вывода
+    for table_name, group in metadata_df.groupby('table_name'):
+        with st.expander(f"Таблица: `{table_name}`", expanded=True):
+            st.table(group[['column_name', 'description']].rename(columns={
+                'column_name': 'Поле',
+                'description': 'Описание'
+            }).set_index('Поле'))
+
+================================================================================
+
+# frontend-streamlit/lc_agent/__init__.py
+
+
+================================================================================
+
+# frontend-streamlit/lc_agent/prompts.py
+# frontend-streamlit/lc_agent/prompts.py (ВЕРСИЯ ДЛЯ Pydantic-ИНСТРУМЕНТА)
+
+LC_AGENT_PROMPT_PREFIX = """
+Ты — AI-ассистент, аналитик данных по имени Insight Agent.
+Твоя задача — отвечать на вопросы пользователя, строго следуя приведенному ниже рабочему процессу.
+
+**РАБОЧИЙ ПРОЦЕСС:**
+
+**ШАГ 1: ИЗУЧЕНИЕ СХЕМЫ ДАННЫХ (ОБЯЗАТЕЛЬНО)**
+- Для ЛЮБОГО вопроса от пользователя, твое **первое и единственное действие** — это вызов инструмента `database_schema_description`.
+
+**ШАГ 2: СОСТАВЛЕНИЕ И ВЫПОЛНЕНИЕ SQL-ЗАПРОСА**
+- После изучения схемы, используй стандартный инструмент `sql_db_query` для выполнения `SELECT` запроса.
+
+**ШАГ 3: ФОРМИРОВАНИЕ ФИНАЛЬНОГО ОТВЕТА**
+- Проанализируй результат SQL-запроса.
+
+- **ЕСЛИ РЕЗУЛЬТАТ СОДЕРЖИТ ТАБЛИЧНЫЕ ДАННЫЕ:**
+  - **Твоё действие — вызвать инструмент `display_table`.**
+  - Возьми **оригинальный, необработанный результат** от `sql_db_query`.
+  - Преобразуй его в JSON-строку, содержащую два ключа:
+    - `data`: JSON-массив объектов (список словарей), где каждый объект представляет строку таблицы, а ключи — названия колонок.
+    - `columns`: JSON-массив строк, содержащий названия колонок в правильном порядке.
+  - **Пример JSON-формата:**
+    ```json
+    {
+      "data": [
+        {"Город": "Екатеринбург", "Общее количество клиентов": 40, "Клиенты с подпиской": 22, "Доля клиентов с подпиской (%)": 55.0},
+        {"Город": "Казань", "Общее количество клиентов": 35, "Клиенты с подпиской": 23, "Доля клиентов с подпиской (%)": 65.71}
+      ],
+      "columns": ["Город", "Общее количество клиентов", "Клиенты с подпиской", "Доля клиентов с подпиской (%)"]
+    }
+    ```
+  - Передай эту JSON-строку в параметр `json_input` инструмента `display_table`.
+  - После вызова инструмента, напиши краткое пояснение, что ты нашел.
+
+- **ЕСЛИ РЕЗУЛЬТАТ — ЭТО ОДНО ЗНАЧЕНИЕ (например, `COUNT`):**
+  - Сформулируй краткий и ясный текстовый ответ для пользователя.
+"""
+
+================================================================================
+
+# frontend-streamlit/lc_agent/agent_builder.py
+# frontend-streamlit/lc_agent/agent_builder.py (ФИНАЛЬНАЯ ВЕРСИЯ С ПРАВИЛЬНЫМ ПРИЕМОМ АРГУМЕНТОВ)
+
+import json
+from langchain_community.agent_toolkits import create_sql_agent, SQLDatabaseToolkit
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.agents import AgentExecutor
+from langchain_community.utilities.sql_database import SQLDatabase
+from langchain.tools import Tool
+from typing import List
+from pydantic.v1 import BaseModel, Field
+from langchain_core.tools import BaseTool
+
+from langchain_core.agents import AgentFinish
+from langchain_core.exceptions import OutputParserException
+
+from core.db_connect import get_engine
+from .prompts import LC_AGENT_PROMPT_PREFIX
+from tools.custom_tools import get_table_schema_description
+
+class TableDisplayArgs(BaseModel):
+    json_input: str = Field(description="JSON-строка, содержащая данные для отображения в виде списка словарей и список названий колонок.")
+
+class DisplayTableTool(BaseTool):
+    """Инструмент, который служит сигналом для UI для отображения таблицы."""
+    name: str = "display_table"
+    description: str = (
+        "Используй этот инструмент, чтобы отобразить табличные данные пользователю. "
+        "Передай ему данные и названия колонок."
+    )
+    args_schema: type[BaseModel] = TableDisplayArgs
+
+    # --- ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ ---
+    # Мы явно указываем, что метод принимает аргументы 'data' и 'columns'.
+    # Это позволяет LangChain правильно передать в них значения из JSON.
+    def _run(self, json_input: str) -> str:
+        # Парсим json_input как JSON-строку
+        try:
+            parsed_input = json.loads(json_input)
+            data = parsed_input.get("data")
+            columns = parsed_input.get("columns")
+
+            if data is None or columns is None:
+                return f"Ошибка: Отсутствуют 'data' или 'columns' в json_input: {json_input}"
+
+            # Этот инструмент по-прежнему не выполняет никакой логики,
+            # но теперь он корректно принимает структурированные данные.
+            return "Таблица была успешно передана для отображения."
+        except json.JSONDecodeError as e:
+            return f"Ошибка парсинга JSON: {e}. Получено: {json_input}"
+
+def _handle_parsing_error(error: OutputParserException) -> AgentFinish:
+    """Обработчик ошибок парсинга ответа LLM."""
+    response = error.llm_output
+    print(f"ПОЙМАНА ОШИБКА ПАРСИНГА. Возвращаем 'сырой' текст: {response}")
+    return AgentFinish({"output": response}, log=str(error))
+
+def create_lc_agent() -> AgentExecutor:
+    """Создает LangChain SQL Agent."""
+    engine = get_engine()
+    db = SQLDatabase(engine)
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash-lite", temperature=0)
+    
+    toolkit = SQLDatabaseToolkit(db=db, llm=llm)
+
+    custom_tools: List[BaseTool] = [
+        Tool(
+            name="database_schema_description",
+            func=lambda _: get_table_schema_description(engine),
+            description="ОБЯЗАТЕЛЬНО используй этот инструмент В ПЕРВУЮ ОЧЕРЕДЬ..."
+        ),
+        DisplayTableTool()
+    ]
+
+    return create_sql_agent(
+        llm=llm,
+        toolkit=toolkit,
+        verbose=True,
+        handle_parsing_errors=_handle_parsing_error,
+        extra_tools=custom_tools,
+        agent_kwargs={"prefix": LC_AGENT_PROMPT_PREFIX}
+    )
+
+
+================================================================================
+
